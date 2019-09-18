@@ -69,7 +69,7 @@ class LogSessionRunHook(tf.train.SessionRunHook):
 def cnn_model_function(features, labels, mode, params):
     labels = tf.reshape(labels, (-1,))  # Squash unnecessary unary dim
     
-    model_dtype = tf.float16
+    model_dtype = tf.float32
     model_format = 'channels_first'
   
     inputs = features  # TODO: Should be using feature columns?
@@ -131,9 +131,9 @@ def cnn_model_function(features, labels, mode, params):
                     labels=labels, predictions=predicted_classes)
                 top5acc = tf.metrics.mean(
                     tf.cast(tf.nn.in_top_k(logits, labels, 5), tf.float32))
-                #newaccuracy = (hvd.allreduce(accuracy[0]), accuracy[1])
-                #newtop5acc = (hvd.allreduce(top5acc[0]), top5acc[1])
-                metrics = {'val-top1acc': accuracy, 'val-top5acc': top5acc}
+                newaccuracy = (hvd.allreduce(accuracy[0]), accuracy[1])
+                newtop5acc = (hvd.allreduce(top5acc[0]), top5acc[1])
+                metrics = {'val-top1acc': newaccuracy, 'val-top5acc': newtop5acc}
             return tf.estimator.EstimatorSpec(
                 mode, loss=loss, eval_metric_ops=metrics)
 
@@ -168,7 +168,7 @@ def cnn_model_function(features, labels, mode, params):
             
         opt = tf.train.MomentumOptimizer(
             learning_rate, momentum, use_nesterov=True)
-        opt = hvd.DistributedOptimizer(opt)
+        opt = hvd.DistributedOptimizer(opt, device_dense=FLAGS.horovod_device)
         opt = MixedOptimizer(opt, scale=loss_scale)
         update_ops = tf.get_collection(tf.GraphKeys.UPDATE_OPS) or []
         with tf.control_dependencies(update_ops):
@@ -214,6 +214,12 @@ def add_cli_args():
                          help="""Weight decay""")
     cmdline.add_argument('--loss_scale', default=256., type=float,
                          help="""loss scale""")
+    
+    cmdline.add_argument('--horovod_device', default='', type=str,
+                         help="""Device to do Horovod all-reduce on
+                                 empty (default), cpu or gpu. Default with utilize GPU if
+                                 Horovod was compiled with the HOROVOD_GPU_ALLREDUCE
+                                 option, and CPU otherwise.""")
    
     return cmdline
 
